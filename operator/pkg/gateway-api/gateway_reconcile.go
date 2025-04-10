@@ -93,9 +93,17 @@ func (r *gatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	tlsRouteList := &gatewayv1alpha2.TLSRouteList{}
+	hasTLSRouteCRD := true
 	if err := r.Client.List(ctx, tlsRouteList); err != nil {
-		scopedLog.ErrorContext(ctx, "Unable to list TLSRoutes", logfields.Error, err)
-		return r.handleReconcileErrorWithStatus(ctx, err, original, gw)
+		// Check if the error is due to the TLSRoute CRD not being installed
+		if k8serrors.IsNotFound(err) || err.Error() == "no kind is registered for the type v1alpha2.TLSRouteList in scheme" {
+			scopedLog.InfoContext(ctx, "TLSRoute CRD is not installed, skipping TLSRoute processing")
+			hasTLSRouteCRD = false
+			// Continue with empty TLSRouteList
+		} else {
+			scopedLog.ErrorContext(ctx, "Unable to list TLSRoutes", logfields.Error, err)
+			return r.handleReconcileErrorWithStatus(ctx, err, original, gw)
+		}
 	}
 
 	// TODO(tam): Only list the services / ServiceImports used by accepted Routes
@@ -125,7 +133,10 @@ func (r *gatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	httpRoutes := r.filterHTTPRoutesByGateway(ctx, gw, httpRouteList.Items)
-	tlsRoutes := r.filterTLSRoutesByGateway(ctx, gw, tlsRouteList.Items)
+	var tlsRoutes []gatewayv1alpha2.TLSRoute
+	if hasTLSRouteCRD {
+		tlsRoutes = r.filterTLSRoutesByGateway(ctx, gw, tlsRouteList.Items)
+	}
 	grpcRoutes := r.filterGRPCRoutesByGateway(ctx, gw, grpcRouteList.Items)
 
 	httpListeners, tlsPassthroughListeners := ingestion.GatewayAPI(ingestion.Input{
@@ -140,7 +151,7 @@ func (r *gatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		ReferenceGrants:    grants.Items,
 	})
 
-	if err := r.setListenerStatus(ctx, gw, httpRouteList, tlsRouteList); err != nil {
+	if err := r.setListenerStatus(ctx, gw, httpRouteList, tlsRouteList, hasTLSRouteCRD); err != nil {
 		scopedLog.ErrorContext(ctx, "Unable to set listener status", logfields.Error, err)
 		setGatewayAccepted(gw, false, "Unable to set listener status", gatewayv1.GatewayReasonNoResources)
 		return r.handleReconcileErrorWithStatus(ctx, err, original, gw)
@@ -438,7 +449,7 @@ func (r *gatewayReconciler) setStaticAddressStatus(ctx context.Context, gw *gate
 	return nil
 }
 
-func (r *gatewayReconciler) setListenerStatus(ctx context.Context, gw *gatewayv1.Gateway, httpRoutes *gatewayv1.HTTPRouteList, tlsRoutes *gatewayv1alpha2.TLSRouteList) error {
+func (r *gatewayReconciler) setListenerStatus(ctx context.Context, gw *gatewayv1.Gateway, httpRoutes *gatewayv1.HTTPRouteList, tlsRoutes *gatewayv1alpha2.TLSRouteList, hasTLSRouteCRD bool) error {
 	grants := &gatewayv1beta1.ReferenceGrantList{}
 	if err := r.Client.List(ctx, grants); err != nil {
 		return fmt.Errorf("failed to retrieve reference grants: %w", err)
@@ -538,7 +549,9 @@ func (r *gatewayReconciler) setListenerStatus(ctx context.Context, gw *gatewayv1
 
 		var attachedRoutes int32
 		attachedRoutes += int32(len(r.filterHTTPRoutesByListener(ctx, gw, &l, httpRoutes.Items)))
-		attachedRoutes += int32(len(r.filterTLSRoutesByListener(ctx, gw, &l, tlsRoutes.Items)))
+		if hasTLSRouteCRD {
+			attachedRoutes += int32(len(r.filterTLSRoutesByListener(ctx, gw, &l, tlsRoutes.Items)))
+		}
 
 		found := false
 		for i := range gw.Status.Listeners {
