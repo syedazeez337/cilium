@@ -50,7 +50,7 @@ type CiliumEgressGatewayPolicySpec struct {
 
 	// DestinationCIDRs is a list of destination CIDRs for destination IP addresses.
 	// If a destination IP matches any one CIDR, it will be selected.
-	DestinationCIDRs []IPv4CIDR `json:"destinationCIDRs"`
+	DestinationCIDRs []CIDR `json:"destinationCIDRs"`
 
 	// ExcludedCIDRs is a list of destination CIDRs that will be excluded
 	// from the egress gateway redirection and SNAT logic.
@@ -58,7 +58,7 @@ type CiliumEgressGatewayPolicySpec struct {
 	// effect.
 	//
 	// +kubebuilder:validation:Optional
-	ExcludedCIDRs []IPv4CIDR `json:"excludedCIDRs"`
+	ExcludedCIDRs []CIDR `json:"excludedCIDRs"`
 
 	// EgressGateway is the gateway node responsible for SNATing traffic.
 	EgressGateway *EgressGateway `json:"egressGateway"`
@@ -83,11 +83,11 @@ type EgressGateway struct {
 	//
 	// Example:
 	// When set to "eth1", matching egress traffic will be redirected to the
-	// node matching the NodeSelector field and SNATed with the first IPv4
+	// node matching the NodeSelector field and SNATed with the first IP address\n\t// (IPv4 or IPv6 depending on the destination CIDR)
 	// address assigned to the eth1 interface.
 	//
 	// When none of the Interface or EgressIP fields is specified, the
-	// policy will use the first IPv4 assigned to the interface with the
+	// policy will use the first IP address (IPv4 or IPv6 depending on the destination CIDR)\n\t// assigned to the interface with the
 	// default route.
 	Interface string `json:"interface,omitempty"`
 
@@ -100,10 +100,10 @@ type EgressGateway struct {
 	// with IP address 192.168.1.100.
 	//
 	// When none of the Interface or EgressIP fields is specified, the
-	// policy will use the first IPv4 assigned to the interface with the
+	// policy will use the first IP address (IPv4 or IPv6 depending on the destination CIDR)\n\t// assigned to the interface with the
 	// default route.
 	//
-	// +kubebuilder:validation:Format=ipv4
+	// +kubebuilder:validation:Format=ip
 	EgressIP string `json:"egressIP,omitempty"`
 }
 

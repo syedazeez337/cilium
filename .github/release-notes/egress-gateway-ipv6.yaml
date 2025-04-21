@@ -1,0 +1,4 @@
+kind: feature
+area: egressgateway
+summary: |
+  Add support for IPv6 in egress gateway policies and introduce a new `--enable-egress-gateway` flag that enables egress gateway for both IPv4 and IPv6.
