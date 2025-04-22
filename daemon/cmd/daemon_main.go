@@ -29,6 +29,7 @@ import (
 
 	"github.com/cilium/cilium/daemon/cmd/cni"
 	agentK8s "github.com/cilium/cilium/daemon/k8s"
+	"github.com/cilium/cilium/pkg/auth"
 	"github.com/cilium/cilium/pkg/aws/eni"
 	"github.com/cilium/cilium/pkg/bpf"
 	"github.com/cilium/cilium/pkg/cgroups"
@@ -38,6 +39,7 @@ import (
 	"github.com/cilium/cilium/pkg/controller"
 	"github.com/cilium/cilium/pkg/crypto/certificatemanager"
 	linuxdatapath "github.com/cilium/cilium/pkg/datapath/linux"
+	"github.com/cilium/cilium/pkg/datapath/linux/bigtcp"
 	"github.com/cilium/cilium/pkg/datapath/linux/ipsec"
 	"github.com/cilium/cilium/pkg/datapath/linux/probes"
 	linuxrouting "github.com/cilium/cilium/pkg/datapath/linux/routing"
@@ -58,6 +60,7 @@ import (
 	"github.com/cilium/cilium/pkg/fqdn/bootstrap"
 	"github.com/cilium/cilium/pkg/health"
 	"github.com/cilium/cilium/pkg/hive"
+	hubblecell "github.com/cilium/cilium/pkg/hubble/cell"
 	"github.com/cilium/cilium/pkg/identity"
 	identitycell "github.com/cilium/cilium/pkg/identity/cache/cell"
 	"github.com/cilium/cilium/pkg/identity/identitymanager"
@@ -81,6 +84,7 @@ import (
 	"github.com/cilium/cilium/pkg/maps/lbmap"
 	"github.com/cilium/cilium/pkg/maps/nat"
 	"github.com/cilium/cilium/pkg/maps/neighborsmap"
+	"github.com/cilium/cilium/pkg/maps/policymap"
 	"github.com/cilium/cilium/pkg/metrics"
 	monitorAgent "github.com/cilium/cilium/pkg/monitor/agent"
 	monitorAPI "github.com/cilium/cilium/pkg/monitor/api"
@@ -93,10 +97,10 @@ import (
 	"github.com/cilium/cilium/pkg/policy"
 	policyDirectory "github.com/cilium/cilium/pkg/policy/directory"
 	"github.com/cilium/cilium/pkg/promise"
+	"github.com/cilium/cilium/pkg/proxy"
 	"github.com/cilium/cilium/pkg/rate"
 	"github.com/cilium/cilium/pkg/redirectpolicy"
 	"github.com/cilium/cilium/pkg/service"
-	"github.com/cilium/cilium/pkg/status"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/version"
 	wireguard "github.com/cilium/cilium/pkg/wireguard/agent"
@@ -668,10 +672,10 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.Bool(option.EnableIPMasqAgent, false, "Enable BPF ip-masq-agent")
 	option.BindEnv(vp, option.EnableIPMasqAgent)
 
-	flags.Bool(option.EnableIPv4EgressGateway, false, "Enable egress gateway for IPv4 (deprecated, use enable-egress-gateway instead)")
+	flags.Bool(option.EnableIPv4EgressGateway, false, "Enable egress gateway for IPv4 (deprecated, use --enable-egress-gateway instead)")
 	option.BindEnv(vp, option.EnableIPv4EgressGateway)
 
-	flags.Bool(option.EnableEgressGateway, false, "Enable egress gateway for both IPv4 and IPv6")
+	flags.Bool(option.EnableEgressGateway, false, "Enable egress gateway (for both IPv4 and IPv6)")
 	option.BindEnv(vp, option.EnableEgressGateway)
 
 	flags.Bool(option.EnableEnvoyConfig, false, "Enable Envoy Config CRDs")
@@ -1527,6 +1531,7 @@ type daemonParams struct {
 	NodeHandler         datapath.NodeHandler
 	NodeNeighbors       datapath.NodeNeighbors
 	NodeAddressing      datapath.NodeAddressing
+	PolicyMapFactory    policymap.Factory
 	EndpointCreator     endpointcreator.EndpointCreator
 	EndpointManager     endpointmanager.EndpointManager
 	CertManager         certificatemanager.CertificateManager
@@ -1541,8 +1546,10 @@ type daemonParams struct {
 	ClusterMesh         *clustermesh.ClusterMesh
 	MonitorAgent        monitorAgent.Agent
 	ServiceManager      service.ServiceManager
+	L7Proxy             *proxy.Proxy
 	DB                  *statedb.DB
 	APILimiterSet       *rate.APILimiterSet
+	AuthManager         *auth.AuthManager
 	Settings            cellSettings
 	Routes              statedb.Table[*datapathTables.Route]
 	Devices             statedb.Table[*datapathTables.Device]
@@ -1556,6 +1563,7 @@ type daemonParams struct {
 	IPIdentitySyncer    *ipcache.IPIdentitySynchronizer
 	EndpointRegenerator *endpoint.Regenerator
 	ClusterInfo         cmtypes.ClusterInfo
+	BigTCPConfig        *bigtcp.Configuration
 	TunnelConfig        tunnel.Config
 	BandwidthManager    datapath.BandwidthManager
 	IPsecKeyCustodian   datapath.IPsecKeyCustodian
@@ -1568,11 +1576,11 @@ type daemonParams struct {
 	CRDSyncPromise      promise.Promise[k8sSynced.CRDSync]
 	IdentityManager     identitymanager.IDManager
 	Orchestrator        datapath.Orchestrator
+	Hubble              hubblecell.HubbleIntegration
 	LRPManager          *redirectpolicy.Manager
 	MaglevConfig        maglev.Config
 	ExpLBConfig         experimental.Config
 	DNSProxy            bootstrap.FQDNProxyBootstrapper
-	StatusCollector     status.StatusCollector
 }
 
 func newDaemonPromise(params daemonParams) promise.Promise[*Daemon] {
@@ -1805,6 +1813,10 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 		}
 	}
 	bootstrapStats.healthCheck.End(true)
+
+	if err := d.startStatusCollector(d.ctx, cleaner); err != nil {
+		return fmt.Errorf("failed to start status collector: %w", err)
+	}
 
 	d.startAgentHealthHTTPService()
 	if option.Config.KubeProxyReplacementHealthzBindAddr != "" {

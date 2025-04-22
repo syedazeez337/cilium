@@ -1,0 +1,5 @@
+---
+feature-area: Egress Gateway
+release-note: |
+  Add a new `--enable-egress-gateway` flag that enables egress gateway for both IPv4 and IPv6, 
+  deprecating the IPv4-only `--enable-ipv4-egress-gateway` flag.
