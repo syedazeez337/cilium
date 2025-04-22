@@ -182,17 +182,21 @@ func (gwc *gatewayConfig) deriveFromPolicyGatewayConfig(logger *slog.Logger, gc 
 		// If the gateway config specifies an egress IP, use the interface with that IP as egress
 		// interface.
 		if gc.egressIP.Is4() {
+			// For IPv4 egress IP
 			gwc.egressIP4 = gc.egressIP
 			gwc.ifaceName, err = netdevice.GetIfaceWithIPv4Address(gc.egressIP)
 			if err != nil {
 				return fmt.Errorf("failed to retrieve interface with IPv4 egress IP: %w", err)
 			}
 		} else if gc.egressIP.Is6() {
+			// For IPv6 egress IP
 			gwc.egressIP6 = gc.egressIP
 			gwc.ifaceName, err = netdevice.GetIfaceWithIPv6Address(gc.egressIP)
 			if err != nil {
 				return fmt.Errorf("failed to retrieve interface with IPv6 egress IP: %w", err)
 			}
+		} else {
+			return fmt.Errorf("invalid egress IP: %s", gc.egressIP)
 		}
 
 	default:
@@ -305,6 +309,9 @@ func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 		policyGwc.egressIP = addr
 	}
 
+	hasIPv4Cidrs := false
+	hasIPv6Cidrs := false
+
 	for _, cidrString := range destinationCIDRs {
 		cidr, err := netip.ParsePrefix(string(cidrString))
 		if err != nil {
@@ -313,6 +320,19 @@ func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 		dstCidrList = append(dstCidrList, cidr)
 		if cidr.Addr().Is6() {
 			policyGwc.v6needed = true
+			hasIPv6Cidrs = true
+		} else {
+			hasIPv4Cidrs = true
+		}
+	}
+
+	// Validate that the egress IP family matches the destination CIDR families
+	if policyGwc.egressIP.IsValid() {
+		if policyGwc.egressIP.Is4() && hasIPv6Cidrs && !hasIPv4Cidrs {
+			return nil, fmt.Errorf("IPv4 egress IP %s cannot be used with only IPv6 destination CIDRs", policyGwc.egressIP)
+		}
+		if policyGwc.egressIP.Is6() && hasIPv4Cidrs && !hasIPv6Cidrs {
+			return nil, fmt.Errorf("IPv6 egress IP %s cannot be used with only IPv4 destination CIDRs", policyGwc.egressIP)
 		}
 	}
 
