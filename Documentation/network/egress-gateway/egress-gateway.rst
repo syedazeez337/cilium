@@ -268,14 +268,28 @@ There are 3 different ways this can be achieved:
        nodeSelector:
          matchLabels:
            testLabel: testVal
-       egressIP: a.b.c.d
+       egressIP: a.b.c.d  # IPv4 address
+
+   Or for IPv6:
+
+   .. code-block:: yaml
+
+     egressGateway:
+       nodeSelector:
+         matchLabels:
+           testLabel: testVal
+       egressIP: 2001:db8::1  # IPv6 address
 
    .. warning::
 
      The egress IP must be assigned to a network device on the node.
 
+   .. note::
+
+     When using IPv6 egress IP with IPv4 destination CIDRs (or vice versa), you must include at least one destination CIDR of the same IP family as the egress IP.
+
 3. By omitting both ``egressIP`` and ``interface`` properties, which will make
-   the agent use the first IPv4 assigned to the interface for the default route.
+   the agent use the first IPv4/IPv6 assigned to the interface for the default route.
 
    .. code-block:: yaml
 

@@ -102,10 +102,10 @@ type EgressGateway struct {
 	// with IP address 192.168.1.100.
 	//
 	// When none of the Interface or EgressIP fields is specified, the
-	// policy will use the first IPv4 assigned to the interface with the
+	// policy will use the first IPv4/IPv6 assigned to the interface with the
 	// default route.
 	//
-	// +kubebuilder:validation:Format=ipv4
+	// +kubebuilder:validation:Format=ip
 	EgressIP string `json:"egressIP,omitempty"`
 }
 
