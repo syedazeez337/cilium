@@ -366,6 +366,28 @@ func ParseCEGP(cegp *v2.CiliumEgressGatewayPolicy) (*PolicyConfig, error) {
 		}
 	}
 
+	// Check for mismatched IP families
+	if policyGwc.egressIP.IsValid() {
+		hasIPv4Dest := false
+		hasIPv6Dest := false
+
+		for _, cidr := range dstCidrList {
+			if cidr.Addr().Is4() {
+				hasIPv4Dest = true
+			} else if cidr.Addr().Is6() {
+				hasIPv6Dest = true
+			}
+		}
+
+		if policyGwc.egressIP.Is4() && !hasIPv4Dest && hasIPv6Dest {
+			return nil, fmt.Errorf("mismatched IP families: IPv4 egress IP with IPv6 destination CIDRs")
+		}
+
+		if policyGwc.egressIP.Is6() && !hasIPv6Dest && hasIPv4Dest {
+			return nil, fmt.Errorf("mismatched IP families: IPv6 egress IP with IPv4 destination CIDRs")
+		}
+	}
+
 	return &PolicyConfig{
 		endpointSelectors: endpointSelectorList,
 		nodeSelectors:     nodeSelectorList,
