@@ -12,8 +12,6 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/sirupsen/logrus"
-
 	cilium "github.com/cilium/proxy/go/cilium/api"
 
 	"github.com/cilium/cilium/pkg/container/versioned"
@@ -146,7 +144,7 @@ func (p *policyContext) PolicyTrace(format string, a ...any) {
 type SelectorPolicy interface {
 	// CreateRedirects is used to ensure the endpoint has created all the needed redirects
 	// before a new EndpointPolicy is created.
-	RedirectFilters() iter.Seq2[*L4Filter, *PerSelectorPolicy]
+	RedirectFilters() iter.Seq2[*L4Filter, PerSelectorPolicyTuple]
 
 	// DistillPolicy returns the policy in terms of connectivity to peer
 	// Identities.
@@ -244,7 +242,7 @@ func (p *EndpointPolicy) Lookup(key Key) (MapStateEntry, labels.LabelArrayList, 
 type PolicyOwner interface {
 	GetID() uint64
 	GetNamedPort(ingress bool, name string, proto u8proto.U8proto) uint16
-	PolicyDebug(fields logrus.Fields, msg string)
+	PolicyDebug(msg string, attrs ...any)
 	IsHost() bool
 	MapStateSize() int
 	RegenerateIfAlive(regenMetadata *regeneration.ExternalRegenerationMetadata) <-chan bool
@@ -501,21 +499,26 @@ func (l4policy L4DirectionPolicy) toMapState(logger *slog.Logger, p *EndpointPol
 	})
 }
 
+type PerSelectorPolicyTuple struct {
+	Policy   *PerSelectorPolicy
+	Selector CachedSelector
+}
+
 // RedirectFilters returns an iterator for each L4Filter with a redirect in the policy.
-func (p *selectorPolicy) RedirectFilters() iter.Seq2[*L4Filter, *PerSelectorPolicy] {
-	return func(yield func(*L4Filter, *PerSelectorPolicy) bool) {
+func (p *selectorPolicy) RedirectFilters() iter.Seq2[*L4Filter, PerSelectorPolicyTuple] {
+	return func(yield func(*L4Filter, PerSelectorPolicyTuple) bool) {
 		if p.L4Policy.Ingress.forEachRedirectFilter(yield) {
 			p.L4Policy.Egress.forEachRedirectFilter(yield)
 		}
 	}
 }
 
-func (l4policy L4DirectionPolicy) forEachRedirectFilter(yield func(*L4Filter, *PerSelectorPolicy) bool) bool {
+func (l4policy L4DirectionPolicy) forEachRedirectFilter(yield func(*L4Filter, PerSelectorPolicyTuple) bool) bool {
 	ok := true
 	l4policy.PortRules.ForEach(func(l4 *L4Filter) bool {
-		for _, ps := range l4.PerSelectorPolicies {
+		for cs, ps := range l4.PerSelectorPolicies {
 			if ps != nil && ps.IsRedirect() {
-				ok = yield(l4, ps)
+				ok = yield(l4, PerSelectorPolicyTuple{ps, cs})
 			}
 		}
 		return ok
@@ -547,10 +550,10 @@ func (p *EndpointPolicy) ConsumeMapChanges() (closer func(), changes ChangeState
 		}
 		p.VersionHandle = version
 
-		p.PolicyOwner.PolicyDebug(logrus.Fields{
-			logfields.Version: version,
-			logfields.Changes: changes,
-		}, msg)
+		p.PolicyOwner.PolicyDebug(msg,
+			logfields.Version, version,
+			logfields.Changes, changes,
+		)
 	}
 
 	return closer, changes
