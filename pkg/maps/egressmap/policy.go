@@ -55,8 +55,7 @@ type EgressPolicyKey6 struct {
 // EgressPolicyVal6 is the value of an egress policy map.
 type EgressPolicyVal6 struct {
 	EgressIP  types.IPv6 `align:"egress_ip"`
-	GatewayIP types.IPv4 `align:"gateway_ip"`
-	Reserved  [3]uint32  `align:"reserved"`
+	GatewayIP types.IPv6 `align:"gateway_ip"`
 }
 
 type PolicyConfig struct {

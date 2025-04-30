@@ -34,7 +34,7 @@ static __always_inline void del_egressgw_policy_entry(__be32 saddr, __be32 daddr
 static __always_inline void add_egressgw_policy_entry_v6(const union v6addr *saddr,
 							 const union v6addr *daddr,
 							 __u8 cidr,
-							 __be32 gateway_ip,
+							 const union v6addr *gateway_ip,
 							 const union v6addr *egress_ip)
 {
 	struct egress_gw_policy_key6 in_key = {
@@ -45,7 +45,7 @@ static __always_inline void add_egressgw_policy_entry_v6(const union v6addr *sad
 
 	struct egress_gw_policy_entry6 in_val = {
 		.egress_ip  = *egress_ip,
-		.gateway_ip = gateway_ip,
+		.gateway_ip = *gateway_ip,
 	};
 
 	map_update_elem(&cilium_egress_gw_policy_v6, &in_key, &in_val, 0);
